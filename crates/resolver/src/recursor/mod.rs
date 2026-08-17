@@ -11,6 +11,7 @@
 use std::{
     borrow::Cow,
     fs,
+    io::BufReader,
     path::{Path, PathBuf},
 };
 use std::{
@@ -560,6 +561,88 @@ pub struct RecursiveConfig {
     /// Options for the recursor
     #[serde(flatten)]
     pub options: RecursorOptions,
+}
+
+/// JSON configuration for authoritative servers that require encrypted transport.
+#[cfg(feature = "serde")]
+#[derive(Clone, Deserialize, Eq, PartialEq, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct ForcedEncryptedAuthoritativeConfig {
+    /// Authoritative servers covered by the encrypted transport policy.
+    pub servers: Vec<ForcedEncryptedAuthoritativeServerConfig>,
+}
+
+#[cfg(feature = "serde")]
+impl ForcedEncryptedAuthoritativeConfig {
+    /// Read authoritative server encryption policy from a JSON file.
+    pub fn read_json(
+        path: impl AsRef<Path>,
+    ) -> Result<Self, ForcedEncryptedAuthoritativeConfigError> {
+        let path = path.as_ref();
+        let file = fs::File::open(path).map_err(|source| {
+            ForcedEncryptedAuthoritativeConfigError::Open {
+                path: path.to_path_buf(),
+                source,
+            }
+        })?;
+
+        serde_json::from_reader(BufReader::new(file)).map_err(|source| {
+            ForcedEncryptedAuthoritativeConfigError::Parse {
+                path: path.to_path_buf(),
+                source,
+            }
+        })
+    }
+}
+
+/// Error reading authoritative server encryption policy.
+#[cfg(feature = "serde")]
+#[derive(Debug, thiserror::Error)]
+pub enum ForcedEncryptedAuthoritativeConfigError {
+    /// The JSON file could not be opened.
+    #[error("failed to open authoritative encryption policy {path}: {source}")]
+    Open {
+        /// Path to the JSON file.
+        path: PathBuf,
+        /// Underlying file I/O error.
+        source: std::io::Error,
+    },
+    /// The JSON file could not be parsed.
+    #[error("failed to parse authoritative encryption policy {path}: {source}")]
+    Parse {
+        /// Path to the JSON file.
+        path: PathBuf,
+        /// Underlying JSON parse error.
+        source: serde_json::Error,
+    },
+}
+
+/// Configuration for one authoritative server that requires encrypted transport.
+#[cfg(feature = "serde")]
+#[derive(Clone, Deserialize, Eq, PartialEq, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct ForcedEncryptedAuthoritativeServerConfig {
+    /// Server name or address.
+    pub name: String,
+    /// Encrypted transport required for this server.
+    pub protocol: ForcedEncryptedAuthoritativeProtocol,
+    /// Optional trust anchor key material.
+    #[serde(default)]
+    pub trust_anchor: Option<String>,
+    /// Optional human-readable note for this server.
+    #[serde(default)]
+    pub comment: Option<String>,
+}
+
+/// Encrypted transport protocol required for an authoritative server.
+#[cfg(feature = "serde")]
+#[derive(Clone, Deserialize, Eq, PartialEq, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum ForcedEncryptedAuthoritativeProtocol {
+    /// DNS over TLS.
+    Dot,
+    /// DNS over QUIC.
+    Doq,
 }
 
 /// Options for the [`Recursor`]

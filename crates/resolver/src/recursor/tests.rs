@@ -1084,11 +1084,14 @@ mod metrics {
     any(feature = "__tls", feature = "__quic")
 ))]
 mod config {
-    use std::path::Path;
+    use std::{fs, path::Path};
 
     use crate::{
         config::{OpportunisticEncryption, OpportunisticEncryptionConfig},
-        recursor::{DnssecPolicyConfig, RecursiveConfig},
+        recursor::{
+            DnssecPolicyConfig, ForcedEncryptedAuthoritativeConfig,
+            ForcedEncryptedAuthoritativeProtocol, RecursiveConfig,
+        },
     };
 
     #[test]
@@ -1157,38 +1160,33 @@ enabled = {}
     }
 
     #[test]
-    fn can_parse_recursor_forced_encrypted_authorities_json() {
-        #[derive(Debug, serde::Deserialize, PartialEq, Eq)]
-        #[serde(deny_unknown_fields)]
-        struct FileConfig {
-            servers: Vec<EncryptedServerConfig>,
-        }
-
-        #[derive(Debug, serde::Deserialize, PartialEq, Eq)]
-        #[serde(rename_all = "lowercase")]
-        enum ForcedEncryptedProtocol {
-            Dot,
-            Doq,
-        }
-
-        #[derive(Debug, serde::Deserialize, PartialEq, Eq)]
-        #[serde(deny_unknown_fields)]
-        struct EncryptedServerConfig {
-            name: String,
-            protocol: ForcedEncryptedProtocol,
-            #[serde(default)]
-            trust_anchor: Option<String>,
-            #[serde(default)]
-            comment: Option<String>,
-        }
-
+    fn can_parse_recursor_forced_encrypted_authoritatives_json() {
         let input = r#"{"servers":[{"name":"198.41.0.4","protocol":"dot"}]}"#;
-        let parsed: FileConfig = serde_json::from_str(input).unwrap();
+        let parsed: ForcedEncryptedAuthoritativeConfig = serde_json::from_str(input).unwrap();
 
         assert_eq!(parsed.servers[0].name, "198.41.0.4");
         assert_eq!(
             parsed.servers[0].protocol,
-            ForcedEncryptedProtocol::Dot
+            ForcedEncryptedAuthoritativeProtocol::Dot
+        );
+    }
+
+    #[test]
+    fn can_read_recursor_forced_encrypted_authoritatives_json_file() {
+        let path = std::env::temp_dir().join(format!(
+            "hickory-forced-encrypted-authoritatives-{}.json",
+            std::process::id()
+        ));
+        let input = r#"{"servers":[{"name":"198.41.0.4","protocol":"dot"}]}"#;
+        fs::write(&path, input).unwrap();
+
+        let parsed = ForcedEncryptedAuthoritativeConfig::read_json(&path).unwrap();
+
+        fs::remove_file(&path).unwrap();
+        assert_eq!(parsed.servers[0].name, "198.41.0.4");
+        assert_eq!(
+            parsed.servers[0].protocol,
+            ForcedEncryptedAuthoritativeProtocol::Dot
         );
     }
 }
