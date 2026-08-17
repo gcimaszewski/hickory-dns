@@ -1155,6 +1155,42 @@ enabled = {}
             }
         );
     }
+
+    #[test]
+    fn can_parse_recursor_forced_encrypted_authorities_json() {
+        #[derive(Debug, serde::Deserialize, PartialEq, Eq)]
+        #[serde(deny_unknown_fields)]
+        struct FileConfig {
+            servers: Vec<EncryptedServerConfig>,
+        }
+
+        #[derive(Debug, serde::Deserialize, PartialEq, Eq)]
+        #[serde(rename_all = "lowercase")]
+        enum ForcedEncryptedProtocol {
+            Dot,
+            Doq,
+        }
+
+        #[derive(Debug, serde::Deserialize, PartialEq, Eq)]
+        #[serde(deny_unknown_fields)]
+        struct EncryptedServerConfig {
+            name: String,
+            protocol: ForcedEncryptedProtocol,
+            #[serde(default)]
+            trust_anchor: Option<String>,
+            #[serde(default)]
+            comment: Option<String>,
+        }
+
+        let input = r#"{"servers":[{"name":"198.41.0.4","protocol":"dot"}]}"#;
+        let parsed: FileConfig = serde_json::from_str(input).unwrap();
+
+        assert_eq!(parsed.servers[0].name, "198.41.0.4");
+        assert_eq!(
+            parsed.servers[0].protocol,
+            ForcedEncryptedProtocol::Dot
+        );
+    }
 }
 
 const ROOT_IP: IpAddr = IpAddr::V4(Ipv4Addr::new(10, 0, 1, 1));
