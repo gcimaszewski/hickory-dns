@@ -1101,9 +1101,15 @@ mod config {
     #[test]
     fn can_parse_recursive_config() {
         let input = r#"roots = "/etc/root.hints"
+forced_encrypted_authoritatives = "/etc/servers.json"
 dnssec_policy.ValidateWithStaticKey.path = "/etc/trusted-key.key""#;
 
         let config = toml::from_str::<RecursiveConfig>(input).unwrap();
+
+        assert_eq!(
+            config.forced_encrypted_authoritatives.as_deref(),
+            Some(Path::new("/etc/servers.json"))
+        );
 
         if let DnssecPolicyConfig::ValidateWithStaticKey { path, .. } = config.dnssec_policy {
             assert_eq!(Some(Path::new("/etc/trusted-key.key")), path.as_deref());

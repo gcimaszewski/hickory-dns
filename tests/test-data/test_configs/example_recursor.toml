@@ -69,6 +69,7 @@ zone_type = "External"
 [zones.stores]
 type = "recursor"
 roots = "default/root.zone"
+forced_encrypted_authoritatives = "example_encrypted_auth_servers.json"
 ns_cache_size = 1024
 response_cache_size = 1048576
 recursion_limit = 24

@@ -25,7 +25,7 @@ use std::{
 use ipnet::IpNet;
 #[cfg(feature = "serde")]
 use serde::Deserialize;
-use tracing::warn;
+use tracing::{info, warn};
 
 #[cfg(all(feature = "__dnssec", feature = "metrics"))]
 use crate::metrics::recursor::RecursorMetrics;
@@ -88,6 +88,27 @@ impl<P: ConnectionProvider> Recursor<P> {
     ) -> Result<Self, RecursorError> {
         let dnssec_policy =
             DnssecPolicy::from_config(&config.dnssec_policy).map_err(|e| e.to_string())?;
+
+        let _forced_encrypted_authoritative_policy = match &config.forced_encrypted_authoritatives {
+            Some(forced_encrypted_authoritatives) => {
+                let path = match root_dir {
+                    Some(root_dir) => Cow::Owned(root_dir.join(forced_encrypted_authoritatives)),
+                    None => Cow::Borrowed(forced_encrypted_authoritatives),
+                };
+                let config = ForcedEncryptedAuthoritativeConfig::read_json(path.as_ref())
+                    .map_err(|e| e.to_string())?;
+                let server_count = config.servers.len();
+                let policy = ForcedEncryptedAuthoritativePolicy::try_from(config)
+                    .map_err(|e| e.to_string())?;
+                info!(
+                    path = %path.display(),
+                    server_count,
+                    "loaded authoritative encryption policy"
+                );
+                Some(policy)
+            }
+            None => None,
+        };
 
         #[allow(unused_mut, unused_assignments)]
         let mut encrypted_transport_state = None;
@@ -556,6 +577,9 @@ impl<P: ConnectionProvider> ValidatingRecursor<P> {
 pub struct RecursiveConfig {
     /// File with roots, aka hints
     pub roots: PathBuf,
+    /// JSON policy for authoritative servers supporting encrypted transports
+    #[serde(default)]
+    pub forced_encrypted_authoritatives: Option<PathBuf>,
     /// DNSSEC policy
     #[serde(default)]
     pub dnssec_policy: DnssecPolicyConfig,
