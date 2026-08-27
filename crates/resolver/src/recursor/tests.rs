@@ -1086,11 +1086,15 @@ mod metrics {
 mod config {
     use std::{fs, path::Path};
 
+    use hickory_proto::rr::Name;
+
     use crate::{
         config::{OpportunisticEncryption, OpportunisticEncryptionConfig},
         recursor::{
             DnssecPolicyConfig, ForcedEncryptedAuthoritativeConfig,
-            ForcedEncryptedAuthoritativeProtocol, RecursiveConfig,
+            ForcedEncryptedAuthoritativePolicy, ForcedEncryptedAuthoritativePolicyError,
+            ForcedEncryptedAuthoritativeProtocol, ForcedEncryptedAuthoritativeServerConfig,
+            RecursiveConfig,
         },
     };
 
@@ -1161,10 +1165,17 @@ enabled = {}
 
     #[test]
     fn can_parse_recursor_forced_encrypted_authoritatives_json() {
-        let input = r#"{"servers":[{"name":"198.41.0.4","protocol":"dot"}]}"#;
+        let input = r#"{"servers":[{"name":"a.root-servers.net.","address":"198.41.0.4","protocol":"dot"}]}"#;
         let parsed: ForcedEncryptedAuthoritativeConfig = serde_json::from_str(input).unwrap();
 
-        assert_eq!(parsed.servers[0].name, "198.41.0.4");
+        assert_eq!(
+            parsed.servers[0].name,
+            Name::from_ascii("a.root-servers.net.").unwrap()
+        );
+        assert_eq!(
+            parsed.servers[0].address,
+            Some("198.41.0.4".parse().unwrap())
+        );
         assert_eq!(
             parsed.servers[0].protocol,
             ForcedEncryptedAuthoritativeProtocol::Dot
@@ -1177,17 +1188,75 @@ enabled = {}
             "hickory-forced-encrypted-authoritatives-{}.json",
             std::process::id()
         ));
-        let input = r#"{"servers":[{"name":"198.41.0.4","protocol":"dot"}]}"#;
+        let input = r#"{"servers":[{"name":"a.root-servers.net.","address":"198.41.0.4","protocol":"dot"}]}"#;
         fs::write(&path, input).unwrap();
 
         let parsed = ForcedEncryptedAuthoritativeConfig::read_json(&path).unwrap();
 
         fs::remove_file(&path).unwrap();
-        assert_eq!(parsed.servers[0].name, "198.41.0.4");
+        assert_eq!(
+            parsed.servers[0].name,
+            Name::from_ascii("a.root-servers.net.").unwrap()
+        );
+        assert_eq!(
+            parsed.servers[0].address,
+            Some("198.41.0.4".parse().unwrap())
+        );
         assert_eq!(
             parsed.servers[0].protocol,
             ForcedEncryptedAuthoritativeProtocol::Dot
         );
+    }
+
+    #[test]
+    fn forced_encrypted_authoritative_policy_matches_by_ip() {
+        let policy = ForcedEncryptedAuthoritativePolicy::new([(
+            "198.41.0.4".parse().unwrap(),
+            ForcedEncryptedAuthoritativeProtocol::Dot,
+        )]);
+
+        assert_eq!(
+            policy.protocol_for("198.41.0.4".parse().unwrap()),
+            Some(ForcedEncryptedAuthoritativeProtocol::Dot)
+        );
+        assert_eq!(policy.protocol_for("198.41.0.5".parse().unwrap()), None);
+    }
+
+    #[test]
+    fn forced_encrypted_authoritative_config_converts_to_policy() {
+        let config = ForcedEncryptedAuthoritativeConfig {
+            servers: vec![ForcedEncryptedAuthoritativeServerConfig {
+                name: Name::from_ascii("a.root-servers.net.").unwrap(),
+                address: Some("198.41.0.4".parse().unwrap()),
+                protocol: ForcedEncryptedAuthoritativeProtocol::Dot,
+                trust_anchor: None,
+                comment: None,
+            }],
+        };
+
+        let policy = ForcedEncryptedAuthoritativePolicy::try_from(config).unwrap();
+
+        assert_eq!(
+            policy.protocol_for("198.41.0.4".parse().unwrap()),
+            Some(ForcedEncryptedAuthoritativeProtocol::Dot)
+        );
+    }
+
+    #[test]
+    fn forced_encrypted_authoritative_config_rejects_invalid_policy_entries() {
+        let missing_address = ForcedEncryptedAuthoritativeConfig {
+            servers: vec![ForcedEncryptedAuthoritativeServerConfig {
+                name: Name::from_ascii("a.root-servers.net.").unwrap(),
+                address: None,
+                protocol: ForcedEncryptedAuthoritativeProtocol::Dot,
+                trust_anchor: None,
+                comment: None,
+            }],
+        };
+        assert!(matches!(
+            ForcedEncryptedAuthoritativePolicy::try_from(missing_address),
+            Err(ForcedEncryptedAuthoritativePolicyError::MissingServerAddress { .. })
+        ));
     }
 }
 

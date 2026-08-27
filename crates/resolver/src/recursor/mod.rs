@@ -7,6 +7,7 @@
 
 //! A recursive DNS resolver based on the Hickory DNS (stub) resolver
 
+use std::collections::HashMap;
 #[cfg(feature = "serde")]
 use std::{
     borrow::Cow,
@@ -563,18 +564,18 @@ pub struct RecursiveConfig {
     pub options: RecursorOptions,
 }
 
-/// JSON configuration for authoritative servers that require encrypted transport.
+/// JSON policy for authoritative servers with support for encrypted transport
 #[cfg(feature = "serde")]
 #[derive(Clone, Deserialize, Eq, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct ForcedEncryptedAuthoritativeConfig {
-    /// Authoritative servers covered by the encrypted transport policy.
+    /// Authoritative servers covered by this policy
     pub servers: Vec<ForcedEncryptedAuthoritativeServerConfig>,
 }
 
 #[cfg(feature = "serde")]
 impl ForcedEncryptedAuthoritativeConfig {
-    /// Read authoritative server encryption policy from a JSON file.
+    /// Read the policy from a JSON file
     pub fn read_json(
         path: impl AsRef<Path>,
     ) -> Result<Self, ForcedEncryptedAuthoritativeConfigError> {
@@ -595,54 +596,113 @@ impl ForcedEncryptedAuthoritativeConfig {
     }
 }
 
-/// Error reading authoritative server encryption policy.
+/// Error reading an authoritative transport policy
 #[cfg(feature = "serde")]
 #[derive(Debug, thiserror::Error)]
 pub enum ForcedEncryptedAuthoritativeConfigError {
-    /// The JSON file could not be opened.
+    /// The policy file could not be opened
     #[error("failed to open authoritative encryption policy {path}: {source}")]
     Open {
-        /// Path to the JSON file.
+        /// Policy file path
         path: PathBuf,
-        /// Underlying file I/O error.
+        /// Source error
         source: std::io::Error,
     },
-    /// The JSON file could not be parsed.
+    /// The policy file could not be parsed
     #[error("failed to parse authoritative encryption policy {path}: {source}")]
     Parse {
-        /// Path to the JSON file.
+        /// Policy file path
         path: PathBuf,
-        /// Underlying JSON parse error.
+        /// Source error
         source: serde_json::Error,
     },
 }
 
-/// Configuration for one authoritative server that requires encrypted transport.
+/// Encrypted transport policy for a single authoritative server
 #[cfg(feature = "serde")]
 #[derive(Clone, Deserialize, Eq, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct ForcedEncryptedAuthoritativeServerConfig {
-    /// Server name or address.
-    pub name: String,
-    /// Encrypted transport required for this server.
+    /// Server name
+    pub name: Name,
+    /// Authoritative server address (when known)
+    #[serde(default)]
+    pub address: Option<IpAddr>,
+    /// Required encrypted transport protocol
     pub protocol: ForcedEncryptedAuthoritativeProtocol,
-    /// Optional trust anchor key material.
+    /// Trust anchor key material
     #[serde(default)]
     pub trust_anchor: Option<String>,
-    /// Optional human-readable note for this server.
+    /// Human-readable note
     #[serde(default)]
     pub comment: Option<String>,
 }
 
-/// Encrypted transport protocol required for an authoritative server.
+/// Encrypted transport protocols that may be supported by an authoritative server
 #[cfg(feature = "serde")]
-#[derive(Clone, Deserialize, Eq, PartialEq, Debug)]
+#[derive(Clone, Copy, Deserialize, Eq, PartialEq, Debug)]
 #[serde(rename_all = "lowercase")]
 pub enum ForcedEncryptedAuthoritativeProtocol {
-    /// DNS over TLS.
+    /// DNS over TLS
     Dot,
-    /// DNS over QUIC.
+    /// DNS over QUIC
     Doq,
+}
+
+#[cfg(feature = "serde")]
+impl TryFrom<ForcedEncryptedAuthoritativeConfig> for ForcedEncryptedAuthoritativePolicy {
+    type Error = ForcedEncryptedAuthoritativePolicyError;
+
+    fn try_from(config: ForcedEncryptedAuthoritativeConfig) -> Result<Self, Self::Error> {
+        let mut servers_map = HashMap::new();
+
+        for server in config.servers {
+            let Some(server_ip_addr) = server.address else {
+                return Err(
+                    ForcedEncryptedAuthoritativePolicyError::MissingServerAddress {
+                        name: server.name,
+                    },
+                );
+            };
+
+            servers_map.insert(server_ip_addr, server.protocol);
+        }
+
+        Ok(ForcedEncryptedAuthoritativePolicy::new(servers_map))
+    }
+}
+
+/// Error building an authoritative transport policy
+#[cfg(feature = "serde")]
+#[derive(Debug, thiserror::Error)]
+pub enum ForcedEncryptedAuthoritativePolicyError {
+    /// A server entry cannot be matched by address
+    #[error("missing address for authoritative server {name}")]
+    MissingServerAddress {
+        /// Server name from the policy
+        name: Name,
+    },
+}
+
+#[cfg(feature = "serde")]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct ForcedEncryptedAuthoritativePolicy {
+    servers: HashMap<IpAddr, ForcedEncryptedAuthoritativeProtocol>,
+}
+
+#[cfg(feature = "serde")]
+impl ForcedEncryptedAuthoritativePolicy {
+    pub(crate) fn new(
+        servers: impl IntoIterator<Item = (IpAddr, ForcedEncryptedAuthoritativeProtocol)>,
+    ) -> Self {
+        Self {
+            servers: servers.into_iter().collect(),
+        }
+    }
+
+    pub(crate) fn protocol_for(&self, ip: IpAddr) -> Option<ForcedEncryptedAuthoritativeProtocol> {
+        self.servers.get(&ip).copied()
+    }
 }
 
 /// Options for the [`Recursor`]
